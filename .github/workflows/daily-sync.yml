@@ -1,0 +1,57 @@
+name: Daily NSE 500 Data Sync
+
+# Runs automatically every weekday evening (IST) after market close.
+# Also runnable manually from the Actions tab with "Run workflow".
+on:
+  schedule:
+    # 12:00 UTC = 17:30 IST, well after NSE's 15:30 IST close
+    - cron: "0 12 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Clone EOD2 and its historical data
+        run: |
+          git clone --depth 1 https://github.com/BennyThadikaran/eod2.git eod2
+          cd eod2
+          pip install -r requirements.txt
+          python3 setup_data.py
+
+      - name: Run EOD2's live sync against NSE
+        run: |
+          cd eod2/src
+          python3 init.py
+
+      - name: Fetch current NSE 500 constituent list
+        run: python3 scripts/fetch_constituents.py --outdir constituents
+
+      - name: Filter to NSE 500 stocks + index files
+        run: |
+          python3 scripts/filter_nse500.py \
+            --eod2-daily eod2/src/eod2_data/daily \
+            --constituents constituents/ind_nifty500list.csv \
+            --outdir data
+
+      - name: Build frontend manifest
+        run: python3 scripts/build_manifest.py --data-dir data --outfile data/manifest.json
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "nse500-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Daily data sync $(date -u +%Y-%m-%d)"
+          git push
