@@ -45,6 +45,10 @@ jobs:
             --constituents constituents/ind_nifty500list.csv \
             --outdir data
 
+      - name: Backfill index history from niftyindices.com (best-effort)
+        run: python3 scripts/backfill_index_history.py --data-dir data
+        continue-on-error: true
+
       - name: Build frontend manifest
         run: python3 scripts/build_manifest.py --data-dir data --outfile data/manifest.json
 
