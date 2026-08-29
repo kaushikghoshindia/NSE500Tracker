@@ -15,10 +15,30 @@ Usage:
 import argparse
 import json
 from datetime import date
+from http.cookiejar import CookieJar
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPCookieProcessor
 
 import pandas as pd
+
+# niftyindices.com's bot protection wants a prior normal page visit before
+# the API call will respond with real data, so we keep a cookie jar and
+# GET the page once before any POST calls.
+_cookie_jar = CookieJar()
+_opener = build_opener(HTTPCookieProcessor(_cookie_jar))
+_bootstrapped = False
+
+
+def _bootstrap():
+    global _bootstrapped
+    if _bootstrapped:
+        return
+    req = Request("https://www.niftyindices.com/reports/historical-data", headers=HEADERS)
+    try:
+        _opener.open(req, timeout=15)
+    except Exception as e:
+        print(f"  [WARN] Bootstrap GET failed (continuing anyway): {e}")
+    _bootstrapped = True
 
 # Filename in data/indices -> canonical name niftyindices.com expects
 INDEX_MAP = {
@@ -62,6 +82,7 @@ def find_key(record: dict, contains: str):
 
 
 def fetch_index_pr(name: str, start: str, end: str) -> pd.DataFrame:
+    _bootstrap()
     payload = {
         "cinfo": f"{{'name':'{name}','startDate':'{start}','endDate':'{end}','indexName':'{name}'}}"
     }
@@ -71,8 +92,13 @@ def fetch_index_pr(name: str, start: str, end: str) -> pd.DataFrame:
         headers=HEADERS,
         method="POST",
     )
-    with urlopen(req, timeout=60) as resp:
-        outer = json.loads(resp.read().decode("utf-8"))
+    with _opener.open(req, timeout=60) as resp:
+        raw = resp.read().decode("utf-8")
+    try:
+        outer = json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"  [WARN] Non-JSON response for {name}, first 300 chars: {raw[:300]!r}")
+        return pd.DataFrame()
     records = json.loads(outer["d"])
     if not records:
         return pd.DataFrame()
