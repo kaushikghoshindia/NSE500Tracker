@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSE 500 OHLC Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e8eb;
+    --muted: #8b92a1;
+    --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0 0 4px 0; font-size: 1.3rem; }
+  header p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px 24px 60px;
+  }
+  .controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  select, input {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+  }
+  select { min-width: 220px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .stat { }
+  .stat .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat .value { font-size: 1.1rem; font-weight: 600; margin-top: 2px; }
+  canvas { max-height: 420px; }
+  .status { color: var(--muted); font-size: 0.85rem; }
+  .error { color: #ff6b6b; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NSE 500 OHLC Tracker</h1>
+  <p>Daily historical price data for NSE 500 stocks and Nifty indices. Updates automatically every trading day.</p>
+</header>
+
+<main>
+  <div class="controls">
+    <select id="typeSelect">
+      <option value="stocks">Stock</option>
+      <option value="indices">Index</option>
+    </select>
+    <select id="symbolSelect">
+      <option>Loading...</option>
+    </select>
+    <span class="status" id="lastUpdated"></span>
+  </div>
+
+  <div class="panel">
+    <div class="stats" id="statsRow"></div>
+    <canvas id="priceChart"></canvas>
+  </div>
+
+  <p class="status" id="statusMsg"></p>
+</main>
+
+<script>
+const state = { manifest: null, chart: null };
+
+async function loadManifest() {
+  const res = await fetch('data/manifest.json', { cache: 'no-store' });
+  if (!res.ok) throw new Error('manifest.json not found yet - has the first sync run?');
+  return res.json();
+}
+
+function populateSymbolSelect(list) {
+  const sel = document.getElementById('symbolSelect');
+  sel.innerHTML = '';
+  list.forEach(sym => {
+    const opt = document.createElement('option');
+    opt.value = sym;
+    opt.textContent = sym;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadSeries(type, symbol) {
+  const filename = type === 'stocks' ? symbol.toLowerCase() : symbol;
+  const url = `data/${type}/${encodeURIComponent(filename)}.csv`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Could not load ${url}`);
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+  return parsed.data.filter(r => r.Date && r.Close != null);
+}
+
+function renderStats(rows) {
+  const statsRow = document.getElementById('statsRow');
+  if (!rows.length) { statsRow.innerHTML = ''; return; }
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  const change = ((last.Close - first.Close) / first.Close) * 100;
+  const items = [
+    { label: 'From', value: first.Date },
+    { label: 'To', value: last.Date },
+    { label: 'Latest Close', value: last.Close?.toLocaleString('en-IN') },
+    { label: 'Total Return', value: change.toFixed(1) + '%' },
+    { label: 'Data Points', value: rows.length.toLocaleString('en-IN') },
+  ];
+  statsRow.innerHTML = items.map(i =>
+    `<div class="stat"><div class="label">${i.label}</div><div class="value">${i.value}</div></div>`
+  ).join('');
+}
+
+function renderChart(rows, label) {
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  const labels = rows.map(r => r.Date);
+  const closes = rows.map(r => r.Close);
+
+  if (state.chart) state.chart.destroy();
+  state.chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: `${label} Close`,
+        data: closes,
+        borderColor: '#4f8cff',
+        backgroundColor: 'rgba(79,140,255,0.08)',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: true,
+        tension: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, color: '#8b92a1' }, grid: { color: '#2a2e38' } },
+        y: { ticks: { color: '#8b92a1' }, grid: { color: '#2a2e38' } },
+      },
+      plugins: { legend: { labels: { color: '#e6e8eb' } } }
+    }
+  });
+}
+
+async function onSelectionChange() {
+  const type = document.getElementById('typeSelect').value;
+  const symbol = document.getElementById('symbolSelect').value;
+  const statusMsg = document.getElementById('statusMsg');
+  if (!symbol) return;
+  statusMsg.textContent = 'Loading...';
+  statusMsg.className = 'status';
+  try {
+    const rows = await loadSeries(type, symbol);
+    renderStats(rows);
+    renderChart(rows, symbol);
+    statusMsg.textContent = '';
+  } catch (e) {
+    statusMsg.textContent = e.message;
+    statusMsg.className = 'status error';
+  }
+}
+
+async function init() {
+  const statusMsg = document.getElementById('statusMsg');
+  try {
+    state.manifest = await loadManifest();
+    document.getElementById('lastUpdated').textContent =
+      `${state.manifest.stock_count} stocks tracked`;
+
+    const typeSelect = document.getElementById('typeSelect');
+    typeSelect.addEventListener('change', () => {
+      const list = typeSelect.value === 'stocks' ? state.manifest.stocks : state.manifest.indices;
+      populateSymbolSelect(list);
+      onSelectionChange();
+    });
+    document.getElementById('symbolSelect').addEventListener('change', onSelectionChange);
+
+    populateSymbolSelect(state.manifest.stocks);
+    onSelectionChange();
+  } catch (e) {
+    statusMsg.textContent = e.message + ' (run the "Daily NSE 500 Data Sync" workflow once from the Actions tab)';
+    statusMsg.className = 'status error';
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
