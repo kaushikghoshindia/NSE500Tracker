@@ -229,6 +229,7 @@
     "ICICIAMC",
     "ICICIBANK",
     "ICICIGI",
+    "ICICILIFE",
     "ICICIPRULI",
     "IDBI",
     "IDEA",
@@ -533,5 +534,5 @@
     "nifty next 50",
     "nifty smallcap 250"
   ],
-  "stock_count": 525
+  "stock_count": 526
 }
