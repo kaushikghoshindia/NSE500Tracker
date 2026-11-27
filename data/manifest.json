@@ -212,6 +212,7 @@
     "HDFCLIFE",
     "HEG",
     "HEGAM",
+    "HEGRAPHITE",
     "HEROMOTOCO",
     "HEXT",
     "HFCL",
@@ -534,5 +535,5 @@
     "nifty next 50",
     "nifty smallcap 250"
   ],
-  "stock_count": 526
+  "stock_count": 527
 }
